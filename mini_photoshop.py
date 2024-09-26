@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, Menu
+from tkinter import PhotoImage
+
 from PIL import Image, ImageTk, ImageFilter, ImageOps
 import numpy as np
 import cv2
@@ -55,7 +57,7 @@ def binarization():
         img_bin = np.zeros((altura, largura), dtype=np.uint8)  # Ajustado para formato correto
         
         # Definir o limiar de binarização
-        limiar = 50
+        limiar = 100
         
         # Realizar binarização manualmente
         for i in range(altura):
@@ -171,6 +173,85 @@ def contrast_stretch():
         img_pil = Image.fromarray(img_stretched)
         return img_pil
 
+def adaptive_binarization():
+    global img_cv
+    if img_cv is not None:
+        img_gray = monochrome()
+        img_gray_np = np.array(img_gray)
+
+        # Aplicar binarização adaptativa
+        # Usamos um bloco de 11x11 pixels com uma constante de 2 para ajustar o limiar localmente
+        img_bin = np.zeros_like(img_gray_np)
+        altura, largura = img_gray_np.shape
+
+        for i in range(altura):
+            for j in range(largura):
+                # Calcula a média local de um bloco de 11x11 ao redor de (i,j)
+                x_min = max(i - 5, 0)
+                x_max = min(i + 5, altura - 1)
+                y_min = max(j - 5, 0)
+                y_max = min(j + 5, largura - 1)
+                
+                bloco = img_gray_np[x_min:x_max + 1, y_min:y_max + 1]
+                media_local = np.mean(bloco)
+                
+                # Se o valor do pixel for maior que a média local - 2, torna branco, caso contrário, preto
+                img_bin[i, j] = 255 if img_gray_np[i, j] > (media_local - 2) else 0
+
+        img_pil = Image.fromarray(img_bin)
+        return img_pil
+ 
+
+def find_and_draw_rectangles():
+    global img_cv
+    if img_cv is not None:
+        # Passo 1: Converter para monocromático e binarizar usando o novo método
+        img_bin = adaptive_binarization()
+        img_bin_np = np.array(img_bin)  # Converter para numpy array
+
+        # Passo 2: Encontrar contornos
+        altura, largura = img_bin_np.shape
+        contours = []
+        visited = np.zeros_like(img_bin_np)
+
+        for i in range(1, altura - 1):
+            for j in range(1, largura - 1):
+                if img_bin_np[i, j] == 255 and visited[i, j] == 0:
+                    contour = []
+                    stack = [(i, j)]
+                    while stack:
+                        x, y = stack.pop()
+                        if visited[x, y] == 0:
+                            visited[x, y] = 1
+                            contour.append((x, y))
+                            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                                nx, ny = x + dx, y + dy
+                                if 0 <= nx < altura and 0 <= ny < largura:
+                                    if img_bin_np[nx, ny] == 255 and visited[nx, ny] == 0:
+                                        stack.append((nx, ny))
+                    if contour:
+                        contours.append(contour)
+
+        # Passo 3: Filtrar contornos pequenos
+        min_contour_size = 50  # Tamanho mínimo do contorno para considerar
+        filtered_contours = [c for c in contours if len(c) > min_contour_size]
+
+        # Passo 4: Desenhar retângulos ao redor dos contornos
+        img_with_rectangles = cv2.cvtColor(img_bin_np, cv2.COLOR_GRAY2BGR)  # Converter para BGR para manter a imagem original
+        for contour in filtered_contours:
+            min_x = min([p[1] for p in contour])
+            max_x = max([p[1] for p in contour])
+            min_y = min([p[0] for p in contour])
+            max_y = max([p[0] for p in contour])
+
+            # Desenhar o retângulo com uma borda mais espessa (ex: 3px) e cor rosa
+            cv2.rectangle(img_with_rectangles, (min_x, min_y), (max_x, max_y), (255, 0, 255), 3)  # Cor rosa, borda 3px
+
+        img_pil = Image.fromarray(img_with_rectangles)
+        return img_pil
+
+
+
 
 def histogram_equalization():
     global img_cv
@@ -236,8 +317,10 @@ def exit_app():
     root.quit()
 
 # Inicializar janela
+
 root = tk.Tk()
 root.title("Mini Photoshop")
+root.iconbitmap('chave.ico')
 
 # Maximizar a janela na tela do usuário
 root.state('zoomed')
@@ -315,6 +398,7 @@ create_icon_button(left_frame, 'blur.png', lambda: apply_filter(blur), "Desfoque
 create_icon_button(left_frame, 'sharpen.png', lambda: apply_filter(sharpen), "Nitidez")
 create_icon_button(left_frame, 'monochrome.png', lambda: apply_filter(monochrome), "Monocromático")
 create_icon_button(left_frame, 'negative.png', lambda: apply_filter(negative), "Negativo")
+create_icon_button(left_frame, 'retangulo.png', lambda: apply_filter(find_and_draw_rectangles), "Detecção de Retângulos")
 
 create_icon_button(left_frame, 'binario.png', lambda: apply_filter(binarization), "Binarização")
 create_icon_button(left_frame, 'logaritmo.png', lambda: apply_filter(log_transform), "Transformada Logarítmica")
